@@ -27,6 +27,12 @@ jobs:
       - name: 给脚本执行权限
         run: chmod +x src/Scripts/*.sh
 
+      - name: 装构建依赖（configure 需要 autoconf）
+        run: |
+          brew install autoconf automake coreutils 2>&1 | tail -5 || true
+          which autoconf m4 || true
+          autoconf --version | head -1
+
       - name: 检查补丁能否干净应用
         run: |
           set -eu
