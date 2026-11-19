@@ -1,0 +1,96 @@
+name: runtime-full
+
+# 全链构建：从 OpenJDK Zero 一路打包出 libTVAppleRuntime.a。
+# 这一段跑通，才有 app 可编。
+on:
+  workflow_dispatch:
+
+jobs:
+  build-runtime:
+    runs-on: macos-15
+    timeout-minutes: 350
+    steps:
+      - name: 拉上游源码
+        uses: actions/checkout@v4
+        with:
+          repository: jo32/tvbox-silicon
+          path: src
+
+      - name: 环境
+        run: |
+          sw_vers
+          uname -m
+          xcodebuild -version
+          df -h /
+          cd src && git log -1 --format='%H %cd'
+
+      - name: 装依赖
+        run: |
+          chmod +x src/Scripts/*.sh
+          brew install autoconf automake cmake xcodegen python@3.14 maven 2>&1 | tail -6 || true
+          which autoconf cmake xcodegen mvn || true
+          ls /opt/homebrew/opt/python@3.14/bin/ 2>/dev/null || true
+
+      - name: 1 · build-java-host
+        run: cd src && ./Scripts/build-java-host.sh 2>&1 | tail -40
+
+      - name: 2 · libffi
+        run: cd src && ./Scripts/build-apple-libffi.sh ios 2>&1 | tail -20
+
+      - name: 3 · OpenJDK Zero
+        timeout-minutes: 120
+        run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-jvm.sh ios 2>&1 | tail -60
+
+      - name: 4 · unicorn-tci
+        run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-interpreter.sh ios 2>&1 | tail -40
+
+      - name: 5 · native bindings (capstone/keystone)
+        timeout-minutes: 90
+        run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-native-bindings.sh ios 2>&1 | tail -50
+
+      - name: 6 · FFmpeg
+        timeout-minutes: 90
+        run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-ffmpeg.sh ios 2>&1 | tail -40
+
+      - name: 7 · libass
+        run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-libass.sh ios 2>&1 | tail -30
+
+      - name: 8 · package runtime
+        timeout-minutes: 150
+        run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/package-apple-runtime.sh ios 2>&1 | tail -60
+
+      - name: 9 · Python runtime
+        timeout-minutes: 60
+        run: |
+          cd src
+          export HOST_PYTHON="$(brew --prefix python@3.14)/bin/python3.14"
+          ./Scripts/build-apple-python.sh ios 2>&1 | tail -40
+
+      - name: 10 · Python wheels
+        timeout-minutes: 60
+        run: |
+          cd src
+          export HOST_PYTHON="$(brew --prefix python@3.14)/bin/python3.14"
+          ./Scripts/build-apple-python-wheels.sh ios 2>&1 | tail -40
+
+      - name: 产物清单
+        if: always()
+        run: |
+          echo '--- 关键产物 ---'
+          for f in src/build/AppleRuntime/iphoneos/lib/libTVAppleRuntime.a src/build/JavaHost/host.jar; do
+            [ -f "$f" ] && echo "OK  $(du -h "$f")" || echo "MISSING $f"
+          done
+          ls -la src/build/AppleRuntime/iphoneos 2>/dev/null || true
+          du -sh src/build/* 2>/dev/null | sort -h || true
+
+      - name: 上传 runtime
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-runtime-ios
+          path: |
+            src/build/AppleRuntime/iphoneos
+            src/build/JavaHost
+            src/build/ApplePython/iphoneos
+          if-no-files-found: warn
+          retention-days: 7
