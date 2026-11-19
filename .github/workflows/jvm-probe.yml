@@ -1,0 +1,78 @@
+name: jvm-probe
+
+# 只验证一件最重的事：能不能在 macOS runner 上把 OpenJDK Zero 交叉编译成 iOS 静态库。
+# 仓库里只放这个文件，源码由 checkout 上游获取，避免搬运 140MB。
+on:
+  workflow_dispatch:
+
+jobs:
+  build-zero:
+    runs-on: macos-15
+    timeout-minutes: 330
+    steps:
+      - name: 拉上游源码
+        uses: actions/checkout@v4
+        with:
+          repository: jo32/tvbox-silicon
+          path: src
+
+      - name: 环境与磁盘
+        run: |
+          sw_vers
+          uname -m
+          xcodebuild -version
+          df -h /
+          cd src && git log -1 --format='%H %cd'
+
+      - name: 给脚本执行权限
+        run: chmod +x src/Scripts/*.sh
+
+      - name: 检查补丁能否干净应用
+        run: |
+          set -eu
+          cd /tmp
+          git clone --depth 1 https://github.com/openjdk/mobile.git ojm
+          cd ojm
+          git fetch origin c1ed06aaef34c8dccf71e236d1ffa20918a77cfb --depth 1
+          git checkout --detach c1ed06aaef34c8dccf71e236d1ffa20918a77cfb
+          git apply --check "$GITHUB_WORKSPACE/src/Runtime/AppleRuntime/patches/openjdk-apple-zero.patch" \
+            && echo 'PATCH OK' || echo 'PATCH FAILED'
+
+      - name: 编译 libffi
+        run: cd src && Scripts/build-apple-libffi.sh ios
+
+      - name: 编译 OpenJDK Zero (ios)
+        timeout-minutes: 240
+        run: |
+          set -o pipefail
+          cd src
+          JOBS=$(sysctl -n hw.ncpu) Scripts/build-apple-jvm.sh ios 2>&1 | tee /tmp/jvm-build.log
+
+      - name: 产物清单（总是执行）
+        if: always()
+        run: |
+          echo '--- libjvm.a ---'
+          find "$GITHUB_WORKSPACE/src/build" -name 'libjvm.a' 2>/dev/null | head -10 || echo '(none)'
+          echo '--- 所有 .a ---'
+          find "$GITHUB_WORKSPACE/src/build" -name '*.a' 2>/dev/null | head -40 || echo '(none)'
+          echo '--- build 体积 ---'
+          du -sh "$GITHUB_WORKSPACE/src/build" 2>/dev/null || echo '(no build dir)'
+          echo '--- 日志尾 ---'
+          tail -n 80 /tmp/jvm-build.log 2>/dev/null || echo '(no log)'
+
+      - name: 上传构建日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jvm-build-log
+          path: /tmp/jvm-build.log
+          if-no-files-found: warn
+
+      - name: 上传静态库
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zero-static-libs
+          path: src/build/apple-runtime/openjdk-mobile/build/*/images/static-libs/lib
+          if-no-files-found: warn
+          retention-days: 7
