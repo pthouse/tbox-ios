@@ -121,6 +121,30 @@ jobs:
           assert old in s, 'ScriptSniffing pattern not found'
           io.open(p, 'w', encoding='utf-8').write(s.replace(old, new, 1))
           print('patched ScriptSniffing.swift')
+
+          # VideoEnhancement: SDK 未暴露 VT 私有查询，直接回退
+          p = 'src/App/VideoEnhancement.swift'
+          s = io.open(p, encoding='utf-8').read()
+          i = s.find('private static let interpolationLimit:')
+          assert i >= 0, 'interpolationLimit not found'
+          j = s.find('}()', i) + 3
+          repl = ('    private static let interpolationLimit: (side: Int, pixels: Int)? = {\n'
+                  '        return nil\n'
+                  '    }()')
+          io.open(p, 'w', encoding='utf-8').write(s[:i] + repl + s[j:])
+          print('patched VideoEnhancement.swift')
+
+          # LiveRoomsView: Result(catching:) 在 Swift 6 下推不出同步闭包
+          p = 'src/App/LiveRoomsView.swift'
+          s = io.open(p, encoding='utf-8').read()
+          old = '                    group.addTask { await (platform, Result { try await LiveCatalog.search(platform, keyword: query) }) }'
+          new = ('                    group.addTask {\n'
+                 '                        do { return (platform, .success(try await LiveCatalog.search(platform, keyword: query))) }\n'
+                 '                        catch { return (platform, .failure(error)) }\n'
+                 '                    }')
+          assert old in s, 'LiveRoomsView pattern not found'
+          io.open(p, 'w', encoding='utf-8').write(s.replace(old, new, 1))
+          print('patched LiveRoomsView.swift')
           PY
 
       # ── 换成 TBox 的壳 ─────────────────────────────
