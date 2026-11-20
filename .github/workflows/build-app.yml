@@ -1,0 +1,129 @@
+name: build-app
+
+# 全链：runtime → 换 TBox 壳 → xcodegen → xcodebuild → 未签名 ipa
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 400
+    steps:
+      - name: 拉上游源码
+        uses: actions/checkout@v4
+        with:
+          repository: jo32/tvbox-silicon
+          path: src
+
+      - name: 环境
+        run: |
+          sw_vers
+          uname -m
+          xcodebuild -version
+          df -h /
+
+      - name: 装依赖
+        run: |
+          chmod +x src/Scripts/*.sh
+          brew install autoconf automake cmake xcodegen python@3.14 maven 2>&1 | tail -4 || true
+
+      # ── runtime（21 分钟，产物 173 MB）─────────────
+      - name: R1 java-host
+        run: cd src && ./Scripts/build-java-host.sh 2>&1 | tail -20
+      - name: R2 libffi
+        run: cd src && ./Scripts/build-apple-libffi.sh ios 2>&1 | tail -10
+      - name: R3 OpenJDK Zero
+        timeout-minutes: 120
+        run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-jvm.sh ios 2>&1 | tail -40
+      - name: R4 unicorn
+        run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-interpreter.sh ios 2>&1 | tail -20
+      - name: R5 native bindings
+        timeout-minutes: 90
+        run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-native-bindings.sh ios 2>&1 | tail -30
+      - name: R6 ffmpeg
+        timeout-minutes: 90
+        run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-ffmpeg.sh ios 2>&1 | tail -20
+      - name: R7 libass
+        run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-libass.sh ios 2>&1 | tail -20
+      - name: R8 package runtime
+        timeout-minutes: 150
+        run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/package-apple-runtime.sh ios 2>&1 | tail -30
+      - name: R9 python
+        timeout-minutes: 60
+        run: |
+          cd src
+          export HOST_PYTHON="$(brew --prefix python@3.14)/bin/python3.14"
+          ./Scripts/build-apple-python.sh ios 2>&1 | tail -20
+      - name: R10 python wheels
+        timeout-minutes: 60
+        run: |
+          cd src
+          export HOST_PYTHON="$(brew --prefix python@3.14)/bin/python3.14"
+          ./Scripts/build-apple-python-wheels.sh ios 2>&1 | tail -20
+
+      - name: 核对 runtime
+        run: |
+          test -f src/build/AppleRuntime/iphoneos/lib/libTVAppleRuntime.a
+          du -h src/build/AppleRuntime/iphoneos/lib/libTVAppleRuntime.a
+
+      # ── 换成 TBox 的壳 ─────────────────────────────
+      - name: 品牌换壳
+        run: |
+          cp scripts/tbox-rebrand.py src/
+          python3 src/tbox-rebrand.py src
+
+      - name: 生成 Xcode 工程
+        run: cd src && xcodegen generate 2>&1 | tail -20
+
+      # ── 编 app ─────────────────────────────────────
+      - name: xcodebuild
+        timeout-minutes: 90
+        run: |
+          cd src
+          xcodebuild \
+            -project TVBox.xcodeproj \
+            -scheme TVBox-iOS \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            build 2>&1 | tee /tmp/xcodebuild.log | tail -60
+
+      - name: 打未签名 ipa
+        run: |
+          set -eu
+          APP=$(find src/build/dd/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          echo "APP=$APP"
+          test -d "$APP"
+          mkdir -p /tmp/ipa/Payload
+          cp -R "$APP" /tmp/ipa/Payload/
+          cd /tmp/ipa && zip -qry "$GITHUB_WORKSPACE/tbox-unsigned.ipa" Payload
+          ls -lh "$GITHUB_WORKSPACE/tbox-unsigned.ipa"
+
+      - name: 产物清单
+        if: always()
+        run: |
+          ls -la src/build/dd/Build/Products/Release-iphoneos 2>/dev/null | head -20 || echo '(no products)'
+          tail -80 /tmp/xcodebuild.log 2>/dev/null || echo '(no xcodebuild log)'
+
+      - name: 上传 ipa
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tbox-ipa
+          path: |
+            tbox-unsigned.ipa
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: 上传 xcodebuild 日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: /tmp/xcodebuild.log
+          if-no-files-found: warn
