@@ -11,7 +11,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 400
     steps:
       - name: 拉上游源码
@@ -94,6 +94,21 @@ jobs:
           du -h src/build/AppleRuntime/iphoneos/lib/libTVAppleRuntime.a
           du -sh src/build/AppleRuntime/iphoneos
 
+      # 上游仓库里这几处是软链接，Windows 中转后变成普通文件，必须重建
+      - name: 重建软链接
+        run: |
+          cd src
+          rm -rf Packages/TVCore Vendor/FFmpeg Vendor/LibASS
+          ln -sfn .. Packages/TVCore
+          ln -sfn ../build/FFmpeg Vendor/FFmpeg
+          ln -sfn ../build/LibASS Vendor/LibASS
+          ls -l Packages TVCore 2>/dev/null || true
+          ls -l Vendor | head -10
+          test -d Packages/TVCore/App
+          test -d Vendor/FFmpeg/FFmpeg.xcframework
+          test -d Vendor/LibASS/LibASS.xcframework
+          echo "symlinks ok"
+
       # ── 换成 TBox 的壳 ─────────────────────────────
       - name: 拉换壳脚本
         uses: actions/checkout@v4
@@ -113,6 +128,7 @@ jobs:
       - name: xcodebuild
         timeout-minutes: 90
         run: |
+          set -o pipefail
           cd src
           xcodebuild \
             -project TVBox.xcodeproj \
