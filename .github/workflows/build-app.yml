@@ -109,6 +109,20 @@ jobs:
           test -d Vendor/LibASS/LibASS.xcframework
           echo "symlinks ok"
 
+      # 上游 ScriptSniffing.swift 在 Swift 6 下报 "closure captures 'sites' before it is declared"
+      - name: 补丁 Swift 6 严格检查
+        run: |
+          python3 - <<'PY'
+          import io
+          p = 'src/Sources/TVCore/ScriptSniffing.swift'
+          s = io.open(p, encoding='utf-8').read()
+          old = "        let pending = sites.indices.filter { sites[$0].needsSniffing }\n        guard !pending.isEmpty else { return self }\n        var sites = sites\n"
+          new = "        var sites = sites\n        let pending = sites.indices.filter { sites[$0].needsSniffing }\n        guard !pending.isEmpty else { return self }\n"
+          assert old in s, 'ScriptSniffing pattern not found'
+          io.open(p, 'w', encoding='utf-8').write(s.replace(old, new, 1))
+          print('patched ScriptSniffing.swift')
+          PY
+
       # ── 换成 TBox 的壳 ─────────────────────────────
       - name: 拉换壳脚本
         uses: actions/checkout@v4
