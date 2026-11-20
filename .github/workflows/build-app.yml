@@ -145,6 +145,18 @@ jobs:
           assert old in s, 'LiveRoomsView pattern not found'
           io.open(p, 'w', encoding='utf-8').write(s.replace(old, new, 1))
           print('patched LiveRoomsView.swift')
+
+          # 上游代码库整体按 Swift 5 语言模式编写；Xcode 26 的严格并发检查
+          # 会在 @State mutating 访问器、闭包捕获等处误报，退回 5.0 语言模式。
+          p = 'src/project.yml'
+          s = io.open(p, encoding='utf-8').read()
+          old = "SWIFT_VERSION: '6.0'"
+          assert old in s, 'SWIFT_VERSION not found'
+          s = s.replace(old, "SWIFT_VERSION: '5.0'", 1)
+          s = s.replace('OTHER_SWIFT_FLAGS: $(inherited) -Xfrontend -disable-dynamic-actor-isolation',
+                        'OTHER_SWIFT_FLAGS: $(inherited)', 1)
+          io.open(p, 'w', encoding='utf-8').write(s)
+          print('patched project.yml -> SWIFT_VERSION 5.0')
           PY
 
       # ── 换成 TBox 的壳 ─────────────────────────────
