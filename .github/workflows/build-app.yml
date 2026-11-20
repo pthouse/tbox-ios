@@ -157,6 +157,21 @@ jobs:
                         'OTHER_SWIFT_FLAGS: $(inherited)', 1)
           io.open(p, 'w', encoding='utf-8').write(s)
           print('patched project.yml -> SWIFT_VERSION 5.0')
+
+          # LivePluginOfferSection 有 private @State，合成的 memberwise init 降级为
+          # private，外部无法构造；显式补一个 internal init。
+          p = 'src/App/LivePluginsView.swift'
+          s = io.open(p, encoding='utf-8').read()
+          old = '    @State private var previews: [String: URL] = [:]\n'
+          new = ('    @State private var previews: [String: URL] = [:]\n\n'
+                 '    init(title: String, address: URL, entries: [LivePlugins.Entry]) {\n'
+                 '        self.title = title\n'
+                 '        self.address = address\n'
+                 '        self.entries = entries\n'
+                 '    }\n')
+          assert old in s, 'LivePluginOfferSection previews not found'
+          io.open(p, 'w', encoding='utf-8').write(s.replace(old, new, 1))
+          print('patched LivePluginsView.swift init')
           PY
 
       # ── 换成 TBox 的壳 ─────────────────────────────
