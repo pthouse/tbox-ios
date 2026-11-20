@@ -183,6 +183,46 @@ jobs:
           assert old in s, 'LivePluginOfferSection previews not found'
           io.open(p, 'w', encoding='utf-8').write(s.replace(old, new, 1))
           print('patched LivePluginsView.swift init')
+
+          # @State 的部分修改（insert/remove/subscript/+=）要走 _modify 访问器，
+          # Swift 6.2 在 nonmutating 方法与 escaping 闭包中不允许；改为一律整体赋值，
+          # 走 @State 的 nonmutating set。
+          p = 'src/App/LivePluginsView.swift'
+          s = io.open(p, encoding='utf-8').read()
+          old = (
+              '        list.forEach { busy.insert($0.pluginId); failures[$0.pluginId] = nil }\n'
+              '        Task {\n'
+              '            // One after another: a failure leaves the rest to install.\n'
+              '            for entry in list {\n'
+              '                do { try await LivePlugins.shared.install(entry, from: address) }\n'
+              '                catch { failures[entry.pluginId] = error.localizedDescription }\n'
+              '                busy.remove(entry.pluginId)\n'
+              '                revision += 1\n'
+              '            }\n'
+              '        }\n'
+          )
+          new = (
+              '        busy = busy.union(Set(list.map(\\.pluginId)))\n'
+              '        var cleared = failures\n'
+              '        for entry in list { cleared[entry.pluginId] = nil }\n'
+              '        failures = cleared\n'
+              '        Task {\n'
+              '            // One after another: a failure leaves the rest to install.\n'
+              '            for entry in list {\n'
+              '                do { try await LivePlugins.shared.install(entry, from: address) }\n'
+              '                catch {\n'
+              '                    var next = failures\n'
+              '                    next[entry.pluginId] = error.localizedDescription\n'
+              '                    failures = next\n'
+              '                }\n'
+              '                busy = busy.subtracting([entry.pluginId])\n'
+              '                revision = revision + 1\n'
+              '            }\n'
+              '        }\n'
+          )
+          assert old in s, 'install() body not found'
+          io.open(p, 'w', encoding='utf-8').write(s.replace(old, new, 1))
+          print('patched LivePluginsView.swift install()')
           PY
 
       # ── 换成 TBox 的壳 ─────────────────────────────
