@@ -94,6 +94,17 @@ jobs:
           du -h src/build/AppleRuntime/iphoneos/lib/libTVAppleRuntime.a
           du -sh src/build/AppleRuntime/iphoneos
 
+      # actions/cache 的保存阶段只在 job 成功时执行，失败轮次从不落盘。
+      # 用独立 save 步骤 + always()，把 R1–R10 的产物固化下来，后续轮次整段跳过。
+      - name: 保存 runtime 缓存
+        if: always() && steps.rt-cache.outputs.cache-hit != 'true' && inputs.skip_runtime != true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            src/build/AppleRuntime
+            src/build/ApplePython
+          key: apple-runtime-v2-${{ hashFiles('src/Scripts/*.sh') }}
+
       # 上游仓库里这几处是软链接，Windows 中转后变成普通文件，必须重建
       - name: 重建软链接
         run: |
