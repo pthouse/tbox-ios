@@ -27,9 +27,13 @@ jobs:
           path: |
             src/build/AppleRuntime
             src/build/ApplePython
-          key: apple-runtime-v2-${{ hashFiles('src/Scripts/*.sh') }}
+            src/build/FFmpeg
+            src/build/LibASS
+            ~/Library/Caches/tvbox-ffmpeg
+            ~/Library/Caches/tvbox-libass
+          key: apple-runtime-v3-${{ hashFiles('src/Scripts/*.sh') }}
           restore-keys: |
-            apple-runtime-v2-
+            apple-runtime-v3-
 
       - name: 环境
         run: |
@@ -103,7 +107,11 @@ jobs:
           path: |
             src/build/AppleRuntime
             src/build/ApplePython
-          key: apple-runtime-v2-${{ hashFiles('src/Scripts/*.sh') }}
+            src/build/FFmpeg
+            src/build/LibASS
+            ~/Library/Caches/tvbox-ffmpeg
+            ~/Library/Caches/tvbox-libass
+          key: apple-runtime-v3-${{ hashFiles('src/Scripts/*.sh') }}
 
       # 上游仓库里这几处是软链接，Windows 中转后变成普通文件，必须重建
       - name: 重建软链接
