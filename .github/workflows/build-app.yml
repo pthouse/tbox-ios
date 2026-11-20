@@ -34,6 +34,7 @@ jobs:
           key: apple-runtime-v3-${{ hashFiles('src/Scripts/*.sh') }}
           restore-keys: |
             apple-runtime-v3-
+            apple-runtime-v2-
 
       - name: 环境
         run: |
@@ -121,9 +122,16 @@ jobs:
           ln -sfn .. Packages/TVCore
           ln -sfn ../build/FFmpeg Vendor/FFmpeg
           ln -sfn ../build/LibASS Vendor/LibASS
-          ls -l Packages TVCore 2>/dev/null || true
-          ls -l Vendor | head -10
           test -d Packages/TVCore/App
+          # 缺 FFmpeg/LibASS 时按需补跑（缓存命中不完整的情况）
+          if [ ! -d build/FFmpeg/FFmpeg.xcframework ]; then
+            echo "FFmpeg missing, rebuilding"
+            JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-ffmpeg.sh ios 2>&1 | tail -20
+          fi
+          if [ ! -d build/LibASS/LibASS.xcframework ]; then
+            echo "LibASS missing, rebuilding"
+            JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-libass.sh ios 2>&1 | tail -20
+          fi
           test -d Vendor/FFmpeg/FFmpeg.xcframework
           test -d Vendor/LibASS/LibASS.xcframework
           echo "symlinks ok"
