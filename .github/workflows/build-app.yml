@@ -1,8 +1,13 @@
 name: build-app
 
-# 全链：runtime → 换 TBox 壳 → xcodegen → xcodebuild → 未签名 ipa
+# 全链：runtime（带缓存）→ 换 TBox 壳 → xcodegen → xcodebuild → 未签名 ipa
 on:
   workflow_dispatch:
+    inputs:
+      skip_runtime:
+        description: '跳过 runtime（已有缓存时用）'
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -15,46 +20,68 @@ jobs:
           repository: jo32/tvbox-silicon
           path: src
 
+      - name: 恢复 runtime 缓存
+        id: rt-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            src/build/AppleRuntime
+            src/build/ApplePython
+          key: apple-runtime-v2-${{ hashFiles('src/Scripts/*.sh') }}
+          restore-keys: |
+            apple-runtime-v2-
+
       - name: 环境
         run: |
           sw_vers
           uname -m
           xcodebuild -version
           df -h /
+          echo "cache-hit=${{ steps.rt-cache.outputs.cache-hit }}"
 
       - name: 装依赖
         run: |
           chmod +x src/Scripts/*.sh
           brew install autoconf automake cmake xcodegen python@3.14 maven 2>&1 | tail -4 || true
 
-      # ── runtime（21 分钟，产物 173 MB）─────────────
+      # ── runtime（有缓存就整段跳过）─────────────────
       - name: R1 java-host
+        if: steps.rt-cache.outputs.cache-hit != 'true' && inputs.skip_runtime != true
         run: cd src && ./Scripts/build-java-host.sh 2>&1 | tail -20
       - name: R2 libffi
+        if: steps.rt-cache.outputs.cache-hit != 'true' && inputs.skip_runtime != true
         run: cd src && ./Scripts/build-apple-libffi.sh ios 2>&1 | tail -10
       - name: R3 OpenJDK Zero
+        if: steps.rt-cache.outputs.cache-hit != 'true' && inputs.skip_runtime != true
         timeout-minutes: 120
         run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-jvm.sh ios 2>&1 | tail -40
       - name: R4 unicorn
+        if: steps.rt-cache.outputs.cache-hit != 'true' && inputs.skip_runtime != true
         run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-interpreter.sh ios 2>&1 | tail -20
       - name: R5 native bindings
+        if: steps.rt-cache.outputs.cache-hit != 'true' && inputs.skip_runtime != true
         timeout-minutes: 90
         run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-native-bindings.sh ios 2>&1 | tail -30
       - name: R6 ffmpeg
+        if: steps.rt-cache.outputs.cache-hit != 'true' && inputs.skip_runtime != true
         timeout-minutes: 90
         run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-ffmpeg.sh ios 2>&1 | tail -20
       - name: R7 libass
+        if: steps.rt-cache.outputs.cache-hit != 'true' && inputs.skip_runtime != true
         run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/build-apple-libass.sh ios 2>&1 | tail -20
       - name: R8 package runtime
+        if: steps.rt-cache.outputs.cache-hit != 'true' && inputs.skip_runtime != true
         timeout-minutes: 150
         run: cd src && JOBS=$(sysctl -n hw.ncpu) ./Scripts/package-apple-runtime.sh ios 2>&1 | tail -30
       - name: R9 python
+        if: steps.rt-cache.outputs.cache-hit != 'true' && inputs.skip_runtime != true
         timeout-minutes: 60
         run: |
           cd src
           export HOST_PYTHON="$(brew --prefix python@3.14)/bin/python3.14"
           ./Scripts/build-apple-python.sh ios 2>&1 | tail -20
       - name: R10 python wheels
+        if: steps.rt-cache.outputs.cache-hit != 'true' && inputs.skip_runtime != true
         timeout-minutes: 60
         run: |
           cd src
@@ -65,12 +92,19 @@ jobs:
         run: |
           test -f src/build/AppleRuntime/iphoneos/lib/libTVAppleRuntime.a
           du -h src/build/AppleRuntime/iphoneos/lib/libTVAppleRuntime.a
+          du -sh src/build/AppleRuntime/iphoneos
 
       # ── 换成 TBox 的壳 ─────────────────────────────
+      - name: 拉换壳脚本
+        uses: actions/checkout@v4
+        with:
+          repository: pthouse/tbox-ios
+          path: tools
+          sparse-checkout: |
+            scripts
+
       - name: 品牌换壳
-        run: |
-          cp scripts/tbox-rebrand.py src/
-          python3 src/tbox-rebrand.py src
+        run: python3 tools/scripts/tbox-rebrand.py src
 
       - name: 生成 Xcode 工程
         run: cd src && xcodegen generate 2>&1 | tail -20
@@ -127,3 +161,4 @@ jobs:
           name: xcodebuild-log
           path: /tmp/xcodebuild.log
           if-no-files-found: warn
+          retention-days: 14
