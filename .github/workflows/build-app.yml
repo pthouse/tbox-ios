@@ -291,6 +291,33 @@ jobs:
           io.open(p, 'w', encoding='utf-8').write(s)
           print('rehomed install state into @Observable class')
           print('renamed shadowing enum State -> PluginState')
+
+          # ExternalDisplay 用了 Xcode 26 SDK 里没有的 UISceneAccessory / registerSceneAccessory，
+          # 外接屏不是自用必需，就地降级为空实现。
+          p = 'src/App/ExternalDisplay.swift'
+          s = io.open(p, encoding='utf-8').read()
+          old = '        registration = registerSceneAccessory(UISceneAccessory.externalNonInteractive(sceneConfiguration: configuration))\n'
+          assert old in s, 'registerSceneAccessory not found'
+          s = s.replace(old, '        _ = configuration\n        registration = nil\n', 1)
+          old = '        unregisterSceneAccessory(registration)\n'
+          assert old in s, 'unregisterSceneAccessory not found'
+          s = s.replace(old, '        _ = registration\n', 1)
+          io.open(p, 'w', encoding='utf-8').write(s)
+          print('patched ExternalDisplay.swift scene accessory calls')
+
+          # WatchNowPhonePage 的 @State 为 private，合成的 memberwise init 降为 private
+          p = 'src/App/WatchNowPhone.swift'
+          s = io.open(p, encoding='utf-8').read()
+          old = '    @State private var pastHero = false\n'
+          assert s.count(old) == 1, 'pastHero decl not unique'
+          new = ('    @State private var pastHero = false\n\n'
+                 '    init(config: Subscription, sections: Set<HomeSection>) {\n'
+                 '        self.config = config\n'
+                 '        self.sections = sections\n'
+                 '    }\n')
+          s = s.replace(old, new, 1)
+          io.open(p, 'w', encoding='utf-8').write(s)
+          print('patched WatchNowPhone.swift init')
           PY
 
       # ── 换成 TBox 的壳 ─────────────────────────────
