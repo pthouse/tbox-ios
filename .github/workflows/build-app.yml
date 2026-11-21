@@ -302,6 +302,9 @@ jobs:
           old = '        unregisterSceneAccessory(registration)\n'
           assert old in s, 'unregisterSceneAccessory not found'
           s = s.replace(old, '        _ = registration\n', 1)
+          old = '    private var registration: UISceneAccessoryRegistration?\n'
+          assert old in s, 'registration decl not found'
+          s = s.replace(old, '    private var registration: AnyObject?\n', 1)
           io.open(p, 'w', encoding='utf-8').write(s)
           print('patched ExternalDisplay.swift scene accessory calls')
 
