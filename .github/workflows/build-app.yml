@@ -282,8 +282,15 @@ jobs:
               pat = '(?<![.A-Za-z0-9_])' + name + '(?![A-Za-z0-9_:])'
               span = re.sub(pat, 'installer.' + name, span)
           s = s[:start] + span + s[j + 1:]
+
+          # 结构体内的 enum State 遮蔽了 SwiftUI 的 @State 属性，改名解冲突
+          s = s.replace('private enum State { case available, update, installed }',
+                        'private enum PluginState { case available, update, installed }', 1)
+          s = s.replace('private func state(_ entry: LivePlugins.Entry) -> State {',
+                        'private func state(_ entry: LivePlugins.Entry) -> PluginState {', 1)
           io.open(p, 'w', encoding='utf-8').write(s)
           print('rehomed install state into @Observable class')
+          print('renamed shadowing enum State -> PluginState')
           PY
 
       # ── 换成 TBox 的壳 ─────────────────────────────
