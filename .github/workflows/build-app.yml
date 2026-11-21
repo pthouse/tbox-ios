@@ -239,6 +239,51 @@ jobs:
           assert old in s, 'install() body not found'
           io.open(p, 'w', encoding='utf-8').write(s.replace(old, new, 1))
           print('patched LivePluginsView.swift install()')
+
+          # LivePluginOfferSection 内部声明了 enum State，与 SwiftUI 的 @State 同名冲突，
+          # 导致四个 @State 属性在该结构体内被当作普通存储属性，赋值要求 mutating。
+          # 改为 @Observable 类持有状态：引用类型，改属性不动 self。
+          import re
+          p = 'src/App/LivePluginsView.swift'
+          s = io.open(p, encoding='utf-8').read()
+          if 'import Observation' not in s:
+              s = s.replace('import SwiftUI', 'import SwiftUI\nimport Observation', 1)
+
+          decl = ('    @State private var busy: Set<String> = []\n'
+                  '    @State private var failures: [String: String] = [:]\n'
+                  '    @State private var revision = 0\n')
+          assert s.count(decl) == 1, 'state decls not found'
+          s = s.replace(decl, '', 1)
+          pv = '    @State private var previews: [String: URL] = [:]\n'
+          assert s.count(pv) == 1, 'previews decl not unique'
+          s = s.replace(pv, '    @State private var installer = LivePluginInstallState()\n', 1)
+
+          cls = ('@Observable final class LivePluginInstallState {\n'
+                 '    var busy: Set<String> = []\n'
+                 '    var failures: [String: String] = [:]\n'
+                 '    var revision = 0\n'
+                 '    var previews: [String: URL] = [:]\n'
+                 '}\n\n')
+          marker = 'struct LivePluginOfferSection: View {'
+          i = s.find(marker)
+          assert i >= 0, 'struct marker not found'
+          s = s[:i] + cls + s[i:]
+
+          start = i + len(cls) + len(marker) - 1
+          depth, j = 0, start
+          while j < len(s):
+              if s[j] == '{': depth += 1
+              elif s[j] == '}':
+                  depth -= 1
+                  if depth == 0: break
+              j += 1
+          span = s[start:j + 1]
+          for name in ('busy', 'failures', 'revision', 'previews'):
+              pat = '(?<![.A-Za-z0-9_])' + name + '(?![A-Za-z0-9_:])'
+              span = re.sub(pat, 'installer.' + name, span)
+          s = s[:start] + span + s[j + 1:]
+          io.open(p, 'w', encoding='utf-8').write(s)
+          print('rehomed install state into @Observable class')
           PY
 
       # ── 换成 TBox 的壳 ─────────────────────────────
